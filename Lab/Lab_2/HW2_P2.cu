@@ -56,6 +56,14 @@ __host__ __device__ int idx1D(int r, int c, int colSz) // Create two verision: _
     return r * colSz + c;
 }
 
+// Run first to remove overhead when run this program in the first time
+__global__ void warm_up_gpu(){
+  unsigned int tid = blockIdx.x * blockDim.x + threadIdx.x;
+  float ia, ib;
+  ia = ib = 0.0f;
+  ib += ia + tid; 
+}
+
 __global__ void matrix_multiplication_kernel1(float* A, float* B, float* C, int m, int n, int k)
 {
 	//TODO
@@ -180,6 +188,14 @@ void matrix_multiplication(float* A, float* B, float* C, int m, int n, int k,
         CHECK( cudaMemcpy(d_C, C, sizeVecC, cudaMemcpyHostToDevice));
 
         dim3 gridSize( ( m - 1)/(blockSize.y) + 1, (k - 1)/(blockSize.x) + 1); // TODO: Compute gridSize
+
+        // Run the warmup process
+        timer.Start();
+        warm_up_gpu<<<gridSize, blockSize>>>();
+        cudaDeviceSynchronize();
+        timer.Stop();
+        float warmUpTime = timer.Elapsed();
+        printf("Warm up time: %f ms\n", warmUpTime);
         
 		if (kernelType == 1)
 			matrix_multiplication_kernel1<<<gridSize, blockSize>>>(d_A, d_B, d_C, m, n, k);

@@ -49,6 +49,13 @@ struct GpuTimer
     }
 };
 
+// Run first to remove overhead when run this program in the first time
+__global__ void warm_up_gpu(){
+  unsigned int tid = blockIdx.x * blockDim.x + threadIdx.x;
+  float ia, ib;
+  ia = ib = 0.0f;
+  ib += ia + tid; 
+}
 
 __global__ void reduceBlksKernel1(int * in, int * out, int n)
 {
@@ -147,6 +154,14 @@ int reduce(int const * in, int n,
 		// TODO: Copy data to device memories
         CHECK(cudaMemcpy(d_in, in, sizeVecByte, cudaMemcpyHostToDevice));
 
+        // Run the warmup process
+        timer.Start();
+        warm_up_gpu<<<gridSize, blockSize>>>();
+        cudaDeviceSynchronize();
+        timer.Stop();
+        float warmUpTime = timer.Elapsed();
+        printf("Warm up time: %f ms\n", warmUpTime);
+
 		// Call kernel
 		timer.Start();
 		if (kernelType == 1)
@@ -162,7 +177,7 @@ int reduce(int const * in, int n,
 
 		CHECK(cudaGetLastError());
 		
-		// TODO: Copy result from device memories
+		// TODO: Copy result from device memories. I do not want to use atomic addition since it is too slow
         int *h_out = nullptr;
         h_out = (int *) malloc(gridSize.x * sizeof(int));
         CHECK(cudaMemcpy(h_out, d_out, gridSize.x * sizeof(int), cudaMemcpyDeviceToHost));
