@@ -52,14 +52,14 @@ struct GpuTimer
 
 __global__ void reduceBlksKernel1(int * in, int * out, int n)
 {
-	int i = blockIdx.x * blockDim.x * 2; // Each block handles 2 * blockDim.x elements
+	int i = blockIdx.x * blockDim.x * 2; // Unrolling loop with stride 2
     i += 2 * threadIdx.x;
 
-    for (int stride = 1; stride <= blockDim.x; stride *= 2)
+    for (int stride = 1; stride <= blockDim.x; stride <<= 1)
     {
         if (threadIdx.x % stride == 0)
         {
-            if (i + stride < n)
+            if (i < n && i + stride < n)
             {
                 in[i] += in[i + stride];
             }
@@ -75,16 +75,37 @@ __global__ void reduceBlksKernel1(int * in, int * out, int n)
 
 __global__ void reduceBlksKernel2(int * in, int * out,int n)
 {
-	// TODO
+	int iFirst = blockDim.x * blockIdx.x * 2; // Unrolling loop with stride 2
+    
+    for (int stride = 1; stride <= blockDim.x; stride <<= 1)
+    {
+        int i = iFirst + stride * 2 * threadIdx.x; // i is dependent on stride, so we modify i here
+        if ( (i - iFirst) < (blockDim.x * 2))
+        {
+            if (i + stride < n)
+            {
+                in[i] += in[i + stride];
+            }
+        }
+
+        __syncthreads();
+    }
+
+    if (threadIdx.x == 0)
+    {
+        out[blockIdx.x] = in[iFirst];
+    }
 }
 
 __global__ void reduceBlksKernel3(int * in, int * out,int n)
 {
-	int i = blockDim.x * blockIdx.x;
+	int i = blockDim.x * blockIdx.x * 2 + threadIdx.x;
 
-    for (int stride = blockDim.x / 2; stride > 0; stride >>= 1)
+    for (int stride = blockDim.x; stride > 0; stride >>= 1)
     {
-        in[i] += in[i + stride];
+        if (threadIdx.x < stride)
+            if (i < n && i + stride < n)
+                in[i] += in[i + stride];
 
         __syncthreads();
     }
@@ -121,7 +142,7 @@ int reduce(int const * in, int n,
 		// TODO: Allocate device memories
         const int sizeVecByte = n * sizeof(int);
         CHECK(cudaMalloc(&d_in, sizeVecByte));
-        CHECK(cudaMalloc(&d_out, sizeVecByte));
+        CHECK(cudaMalloc(&d_out, gridSize.x * sizeof(int)));
 
 		// TODO: Copy data to device memories
         CHECK(cudaMemcpy(d_in, in, sizeVecByte, cudaMemcpyHostToDevice));
@@ -218,12 +239,16 @@ int main(int argc, char ** argv)
     printf("Correct result: %d\n", correctResult);
 
     // Reduce using device, kernel2
-    //int result2 = reduce(in, n, true, blockSize, 2);
-    //checkCorrectness(result2, correctResult);
+    int result2 = reduce(in, n, true, blockSize, 2);
+    checkCorrectness(result2, correctResult);
+    printf("Result: %d\n", result2);
+    printf("Correct result: %d\n", correctResult);
 
     // Reduce using device, kernel3
-    //int result3 = reduce(in, n, true, blockSize, 3);
-    //checkCorrectness(result3, correctResult);
+    int result3 = reduce(in, n, true, blockSize, 3);
+    checkCorrectness(result3, correctResult);
+    printf("Result: %d\n", result3);
+    printf("Correct result: %d\n", correctResult);
 
     // Free memories
     free(in);

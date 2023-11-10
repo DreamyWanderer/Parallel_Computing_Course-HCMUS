@@ -1,5 +1,7 @@
 #include <stdio.h>
 
+#define idx1D(r, c, colSz) r * colSz + c
+
 #define CHECK(call)\
 {\
 	const cudaError_t error = call;\
@@ -52,6 +54,14 @@ struct GpuTimer
 __global__ void matrix_multiplication_kernel1(float* A, float* B, float* C, int m, int n, int k)
 {
 	//TODO
+    int tidX = blockIdx.x * blockDim.x + threadIdx.x;
+    int tidY = blockIdx.y * blockDim.y + threadIdx.y;
+    int globalCIdx = idx1D(tidX, tidY, k);
+
+    for (int i = 0; i < n; i++)
+    {
+        C[globalCIdx] += A[idx1D(tidX, i, n)] + B[idx1D(i, tidY, k)];
+    }
 }
 
 __global__ void matrix_multiplication_kernel2(float* A, float* B, float* C, int m, int n, int k)
@@ -59,6 +69,33 @@ __global__ void matrix_multiplication_kernel2(float* A, float* B, float* C, int 
 	__shared__ float s_A[TILE_WIDTH][TILE_WIDTH];
 	__shared__ float s_B[TILE_WIDTH][TILE_WIDTH];
 	//TODO
+
+    int numStride = (n - 1) / TILE_WIDTH + 1;
+    int tidX = blockIdx.x * blockDim.x + threadIdx.x;
+    int tidY = blockIdx.y * blockDim.y + threadIdx.y;
+
+    for (int stride = 0; stride <= numStride; stride++)
+    {
+        int globalAIdx = idx1D(tidX, stride * TILE_WIDTH + threadIdx.y, n);
+        int globalBIdx = idx1D(stride * TILE_WIDTH + threadIdx.x, tidY, k);
+
+        if (globalAIdx < m * n)
+            s_A[threadIdx.x][threadIdx.y] = A[globalAIdx];
+        else
+            s_A[threadIdx.x][threadIdx.y] = 0;
+
+        if (globalBIdx < n * k)
+            s_B[threadIdx.x][threadIdx.y] = B[globalBIdx];
+        else
+            s_B[threadIdx.x][threadIdx.y] = 0;
+
+        __syncthreads();
+
+        for (int i = 0; i < TILE_WIDTH; i++)
+            C[idx1D(tidX, tidY, k)] += s_A[threadIdx.y][i] * s_B[i][threadIdx.x];
+
+        __syncthreads();
+    }
 }
 
 void matrix_multiplication(float* A, float* B, float* C, int m, int n, int k,
@@ -68,16 +105,31 @@ void matrix_multiplication(float* A, float* B, float* C, int m, int n, int k,
     timer.Start();
     if (useDevice == false)
     {
-        // TODO
+        for (int r = 0; r < m; r++)
+        {
+            for (int c = 0; c < k; c++)
+            {
+                for (int i = 0; i < n; i++) C[idx1D(r, c, k)] += A[idx1D(r, i, n)] + B[idx1D(i, c, k)];
+            }
+        }
     }
     else // Use device
     {
         // TODO: Allocate device memories
         float* d_A, * d_B, * d_C;
+        const int sizeVecA = sizeof(float) * m * n;
+        const int sizeVecB = sizeof(float) * n * k;
+        const int sizeVecC = sizeof(float) * m *k;
+        CHECK( cudaMalloc(&d_A, sizeVecA));
+        CHECK( cudaMalloc(&d_B, sizeVecB));
+        CHECK( cudaMalloc(&d_C, sizeVecC));
 
         // TODO: Copy data to device memories
-        
-        dim3 gridSize(1); // TODO: Compute gridSize
+        CHECK( cudaMemcpy(d_A, A, sizeVecA, cudaMemcpyHostToDevice));
+        CHECK( cudaMemcpy(d_B, B, sizeVecB, cudaMemcpyHostToDevice));
+        CHECK( cudaMemcpy(d_C, C, sizeVecC, cudaMemcpyHostToDevice));
+
+        dim3 gridSize( ( m - 1)/(blockSize.x) + 1, (k - 1)/(blockSize.y) + 1); // TODO: Compute gridSize
         
 		if (kernelType == 1)
 			matrix_multiplication_kernel1<<<gridSize, blockSize>>>(d_A, d_B, d_C, m, n, k);
@@ -85,8 +137,12 @@ void matrix_multiplication(float* A, float* B, float* C, int m, int n, int k,
 			matrix_multiplication_kernel2<<<gridSize, blockSize>>>(d_A, d_B, d_C, m, n, k);
 
         // TODO: Copy result from device memory
+        CHECK( cudaMemcpy(C, d_C, sizeVecC, cudaMemcpyDeviceToHost));
 
         // TODO: Free device memories
+        cudaFree(d_A);
+        cudaFree(d_B);
+        cudaFree(d_C);
 		
 		printf("Grid size: %d * %d, block size: %d * %d\n", 
 			gridSize.x,gridSize.y, blockSize.x,blockSize.y);
@@ -151,7 +207,7 @@ int main(int argc, char** argv)
  
     for (int i = 0; i < n; i++)
         for (int j = 0;j < k;j++)
-            h_B[i*n+j] = static_cast <float> (rand()) / static_cast <float> (RAND_MAX);
+            h_B[i*k+j] = static_cast <float> (rand()) / static_cast <float> (RAND_MAX);
 
 
     // Add vectors (on host)
