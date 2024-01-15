@@ -94,8 +94,6 @@ __global__ void matrix_multiplication_kernel2(float* A, float* B, float* C, int 
     int tidX = blockIdx.x * blockDim.x + threadIdx.x;
     float sum = 0;
 
-    if (tidY >= m || tidX >= k) return;
-
     for (int stride = 0; stride < numStride; stride++)
     {   
         int globalAIdx = idx1D(tidY, stride * TILE_WIDTH + threadIdx.x, n);
@@ -106,14 +104,14 @@ __global__ void matrix_multiplication_kernel2(float* A, float* B, float* C, int 
 
         //if (tidY == 0 & tidX == 0) printf("A %d %f\n", globalAIdx, A[globalAIdx]);
 
-        if (globalAIdx < m * n)
+        if (tidY < m && stride * TILE_WIDTH + threadIdx.x < n)
             s_A[threadIdx.y][threadIdx.x] = A[globalAIdx];
         else
             s_A[threadIdx.y][threadIdx.x] = 0;
 
         //if (tidY == 0 & tidX == 0) printf("B %d %f\n", globalBIdx, B[globalBIdx]);
 
-        if (globalBIdx < n * k)
+        if ( (stride * TILE_WIDTH + threadIdx.y) < n && tidX < k)
             s_B[threadIdx.y][threadIdx.x] = B[globalBIdx];
         else
             s_B[threadIdx.y][threadIdx.x] = 0;
@@ -156,7 +154,7 @@ __global__ void matrix_multiplication_kernel2(float* A, float* B, float* C, int 
         __syncthreads();
     }
 
-    C[idx1D(tidY, tidX, k)] = sum;
+    if ( (tidY < m) && (tidX < k)) C[idx1D(tidY, tidX, k)] = sum;
 
     __syncthreads();
 }
@@ -175,11 +173,9 @@ void matrix_multiplication(float* A, float* B, float* C, int m, int n, int k,
                 for (int i = 0; i < n; i++) 
                 {
                     C[idx1D(r, c, k)] += A[idx1D(r, i, n)] * B[idx1D(i, c, k)];
-                    //if (r == 0 & c == 0) printf("%f * %f\n", A[idx1D(r, i, n)], B[idx1D(i, c, k)]);
                 }
             }
         }
-
     }
     else // Use device
     {
@@ -197,15 +193,15 @@ void matrix_multiplication(float* A, float* B, float* C, int m, int n, int k,
         CHECK( cudaMemcpy(d_B, B, sizeVecB, cudaMemcpyHostToDevice));
         CHECK( cudaMemcpy(d_C, C, sizeVecC, cudaMemcpyHostToDevice));
 
-        dim3 gridSize( ( m - 1)/(blockSize.y) + 1, (k - 1)/(blockSize.x) + 1); // TODO: Compute gridSize
+        dim3 gridSize( (k - 1)/(blockSize.x) + 1, ( m - 1)/(blockSize.y) + 1); // TODO: Compute gridSize
 
-        // Run the warmup process
+        /* // Run the warmup process
         timer.Start();
         warm_up_gpu<<<gridSize, blockSize>>>();
         cudaDeviceSynchronize();
         timer.Stop();
         float warmUpTime = timer.Elapsed();
-        printf("Warm up time: %f ms\n", warmUpTime);
+        printf("Warm up time: %f ms\n", warmUpTime); */
         
 		if (kernelType == 1)
 			matrix_multiplication_kernel1<<<gridSize, blockSize>>>(d_A, d_B, d_C, m, n, k);
@@ -267,15 +263,16 @@ int main(int argc, char** argv)
     int n; // number of columns in the matrix A, number of rows in the matrix B
     int k; // number of columns in the matrix B
 
-    m = (1 << 10);
-    n = (1 << 9);
-    k = (1 << 10);
+    m = 512;
+    n = 6;
+    k = 25;
 
     // Set up input data
     h_A = (float*)malloc(m * n * sizeof(float));
     h_B = (float*)malloc(n * k * sizeof(float));
     h_C = (float*)malloc(m * k * sizeof(float));
     correct_C = (float*)malloc(m * k * sizeof(float));
+    memset(correct_C, 0.0, m * k * sizeof(float));
 
     for (int i = 0; i < m; i++)
         for (int j = 0;j < n;j++)
@@ -289,7 +286,6 @@ int main(int argc, char** argv)
 
     // Add vectors (on host)
     matrix_multiplication(h_A,h_B,correct_C,m,n,k);
-	printf("\n");
 
 	dim3 blockSize(32, 32); // Default
 	if (argc == 3)

@@ -246,7 +246,6 @@ void blurImg(uchar3 * inPixels, int width, int height, float * filter, int filte
 		CHECK( cudaMemcpy(outPixels, d_Outpixel, sizeInPixel, cudaMemcpyDeviceToHost));
 		printf("%d\n", sizeIdy);
 
-
 		CHECK( cudaFree(d_InPixel));
 		CHECK( cudaFree(d_Outpixel));
 		CHECK( cudaFree(d_filter));
