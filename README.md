@@ -1,17 +1,16 @@
-# Parallel Computation Course Repository - HCMUS-VNUHCM
+# Parallel Computation Course Repository - HCMUS-VNUHCM - Labs
 
-## Inforation
+## Information
 
 - Student: Nguyễn Thế Hoàng (20120090)
-- Instructor:
+- Instructor: PhD. Phạm Trọng Nghĩa
 - Department: Computer Science
 
 ## About repository
 
 This repository contains tasks description, source code and other related documents for this course. It includes:
 
-- x laboratories
-- 1 final project
+- 4 laboratories
 
 ### System requirement
 
